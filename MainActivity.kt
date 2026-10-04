@@ -3,7 +3,12 @@ package com.rachid.remote
 import android.app.Activity
 import android.content.Context
 import android.hardware.ConsumerIrManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -21,7 +26,7 @@ class P(val name: String, val proto: Int, val addr: Int, val k: Map<String, Int>
 
 val PROFILES = listOf(
     // Wi-Fi: كيخدم بنفس الشبكة (راوتر بلا إنترنت عادي). الأرقام = Android KeyEvent
-    P("Wi-Fi: Android TV / TV Box", 3, 0, mapOf("POWER" to 26, "MUTE" to 164, "VOLUP" to 24, "VOLDN" to 25,
+    P("Wi-Fi: Android TV / TV Box / أي جهاز أندرويد", 3, 0, mapOf("POWER" to 26, "MUTE" to 164, "VOLUP" to 24, "VOLDN" to 25,
         "UP" to 19, "DOWN" to 20, "LEFT" to 21, "RIGHT" to 22, "OK" to 23,
         "MENU" to 82, "BACK" to 4, "HOME" to 3, "SETTINGS" to -1, "PLAY" to 85, "INPUT" to 178)),
     P("LG", 0, 0x04, mapOf("POWER" to 0x08, "MUTE" to 0x09, "VOLUP" to 0x02, "VOLDN" to 0x03,
@@ -78,6 +83,35 @@ class MainActivity : Activity() {
         for (b in bits) { l.add(560); l.add(if (b == 1) 1690 else 560) }
         l.add(560)
         return 38000 to l.toIntArray()
+    }
+
+    // ---------- ربط التطبيق بالواي فاي (يخدم حتى لو الراوتر بلا إنترنت) ----------
+    private var wifiCb: ConnectivityManager.NetworkCallback? = null
+
+    private fun bindWifi() {
+        if (Build.VERSION.SDK_INT < 23) return
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val req = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(n: Network) { cm.bindProcessToNetwork(n) }
+                override fun onLost(n: Network) { cm.bindProcessToNetwork(null) }
+            }
+            wifiCb = cb
+            cm.requestNetwork(req, cb)
+        } catch (e: Exception) {}
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            wifiCb?.let { cm.unregisterNetworkCallback(it) }
+            if (Build.VERSION.SDK_INT >= 23) cm.bindProcessToNetwork(null)
+        } catch (e: Exception) {}
     }
 
     // ---------- Wi-Fi (ADB) ----------
@@ -143,6 +177,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
+        bindWifi()
         ir = getSystemService(Context.CONSUMER_IR_SERVICE) as? ConsumerIrManager
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 48, 24, 24) }
 
